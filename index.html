@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>무던한 지도</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1 class="brand"><span aria-hidden="true">○</span> 무던한 지도</h1>
+    <div class="seg" role="group" aria-label="요일 구분">
+      <button type="button" id="day-weekday" aria-pressed="true">평일</button>
+      <button type="button" id="day-weekend" aria-pressed="false">주말</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="panel-map" role="tabpanel" aria-labelledby="tab-map" tabindex="-1">
+      <div class="card hour">
+        <div class="row"><label for="hour">시간대</label><output id="hour-out" for="hour">오후 2시</output></div>
+        <input id="hour" type="range" min="0" max="23" step="1" value="14" aria-label="시간대 선택">
+      </div>
+      <div class="card summary" id="summary"></div>
+      <div class="card mapcard">
+        <p class="notice"><span class="demo-tag">시연용</span> 모든 값은 시연용 가상 측정이에요</p>
+        <div class="map" id="map"></div>
+        <ul class="legend" aria-label="표시 설명">
+          <li><span class="glyph b-calm">○</span>무던</li>
+          <li><span class="glyph b-moderate">△</span>다소</li>
+          <li><span class="glyph b-high">■</span>높음</li>
+          <li><span class="glyph b-unknown">◌</span>정보 부족</li>
+        </ul>
+        <button type="button" class="tgl" id="tgl-unknown" aria-pressed="true"></button>
+        <p class="caption">지도는 개략도예요 (축척 아님).</p>
+      </div>
+      <h2 class="sec">장소 목록</h2>
+      <ul class="list" id="list"></ul>
+    </section>
+
+    <section id="panel-measure" role="tabpanel" aria-labelledby="tab-measure" tabindex="-1" hidden></section>
+    <section id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" tabindex="-1" hidden></section>
+  </main>
+
+  <nav class="tabbar" role="tablist" aria-label="화면 선택">
+    <button type="button" role="tab" id="tab-map" aria-controls="panel-map" aria-selected="true"><span aria-hidden="true">◎</span>지도</button>
+    <button type="button" role="tab" id="tab-measure" aria-controls="panel-measure" aria-selected="false" tabindex="-1"><span aria-hidden="true">◉</span>측정</button>
+    <button type="button" role="tab" id="tab-profile" aria-controls="panel-profile" aria-selected="false" tabindex="-1"><span aria-hidden="true">☺</span>내 아이</button>
+  </nav>
+</div>
+
+<dialog id="sheet" aria-labelledby="sheet-title"></dialog>
+<div id="live" class="sr" aria-live="polite"></div>
+<noscript><p style="padding:16px">이 앱은 JavaScript가 필요해요.</p></noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
