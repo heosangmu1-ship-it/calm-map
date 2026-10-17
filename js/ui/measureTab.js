@@ -2,7 +2,7 @@
 import { createListener } from "../audio.js";
 import { createMeasurement } from "../measure.js";
 import { h, ic } from "./dom.js";
-import { GROUP_KO, dayKo, hourLabel } from "./helpers.js";
+import { GROUP_KO, dayKo, hourLabel, missesMachine } from "./helpers.js";
 import { createWave } from "./wave.js";
 
 const SAMPLES = [
@@ -61,7 +61,8 @@ export function createMeasureTab(ctx) {
   const hint = h("div", { class: "hint", role: "status" });
   const errEl = h("div", { class: "hint err", role: "alert", hidden: true });
   const retryBtn = h("button", { type: "button", class: "btn sec2", id: "m-retry", hidden: true, onclick: () => retryModel() }, "다시 시도");
-  const wavebox = h("div", { class: "wavebox" }, canvas, hint, errEl, retryBtn);
+  const missNote = h("div", { class: "misnote", hidden: true }, "기계음(에어컨·세탁기·청소기)은 놓칠 수 있어요");
+  const wavebox = h("div", { class: "wavebox" }, canvas, hint, errEl, retryBtn, missNote);
   const gIc = ic("ear"), gIcBox = h("span", { class: "gi" }, gIc);
   const gEl = h("div", { class: "big-group" }, "소리 대기"), enEl = h("div", { class: "en", lang: "en" }, " ");
   const dbEl = h("div", { class: "db" }), meter = h("span", { class: "sr", role: "meter", "aria-label": "상대 소리 크기", "aria-valuemin": "-100", "aria-valuemax": "0" });
@@ -135,7 +136,7 @@ export function createMeasureTab(ctx) {
     hasFrame = false; stopClock(); lastGroup = "";
     gEl.textContent = "소리 대기"; live.className = "band"; gEl.classList.remove("st"); enEl.textContent = " "; dbEl.textContent = ""; timeEl.textContent = "00:00";
     gIc.firstChild.setAttribute("href", "vendor/icons/sprite.svg#ear"); gIcBox.classList.remove("calm");
-    chipSudden.hidden = true; chipAnn.hidden = true;
+    chipSudden.hidden = true; chipAnn.hidden = true; missNote.hidden = true;
   }
 
   // own clock: starts when the audio path is up (stream attached or first chunk), not at the first model frame
@@ -162,6 +163,7 @@ export function createMeasureTab(ctx) {
     live.className = HUE[f.group] ? "band b-" + HUE[f.group] : "band";
     gIc.firstChild.setAttribute("href", `vendor/icons/sprite.svg#${GROUP_ICON[f.group]}`);
     gIcBox.classList.toggle("calm", f.group === "calm");
+    missNote.hidden = !missesMachine(f.group, f.topClass);
     enEl.textContent = `${f.topClass} ${Math.round(f.topScore * 100)}%`;
     if (f.ts - lastMeter >= 1000) { lastMeter = f.ts; meter.setAttribute("aria-valuenow", f.db.toFixed(0)); }
     if (f.group !== lastGroup && f.ts - lastAnn >= 5000) { lastAnn = f.ts; lastGroup = f.group; ctx.announce(GROUP_KO[f.group]); }

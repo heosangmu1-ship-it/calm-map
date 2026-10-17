@@ -2,16 +2,15 @@
 // Stored in localStorage: calm.profile, calm.measurements (summary numbers only), calm.texts (edited sentences). Never audio.
 import { slot } from "./index.js";
 import { h, s, store } from "./ui/dom.js";
-import { GLYPH, STIMULI, bandText, cleanSaved, dayOf, dongLabels, dongsOf, frame, hourLabel, nearestCalmSlot, nudge, project, reasonLine, shortName, sortRows, sourceTag, summarize, withSaved, KIND_KO } from "./ui/helpers.js";
+import { GLYPH, STIMULI, bandText, DEFAULT_SLOT, cleanSaved, dongLabels, dongsOf, frame, hourLabel, nearestCalmSlot, nudge, project, reasonLine, shortName, sortRows, sourceTag, summarize, withSaved, KIND_KO, RECALL } from "./ui/helpers.js";
 import { RIVER } from "./ui/river.js";
 import { createSheet } from "./ui/sheet.js";
 import { createMeasureTab } from "./ui/measureTab.js";
 
 const $ = (id) => document.getElementById(id);
 const SIZE = 326; // reference map width in px (390 px phone): collision and label placement are computed here, positions are stored as %
-const now = new Date();
 const state = {
-  base: [], day: dayOf(now), hour: now.getHours(), selected: null, showUnknown: true,
+  base: [], day: DEFAULT_SLOT.day, hour: DEFAULT_SLOT.hour, moved: false, selected: null, showUnknown: true,
   profile: { sensitive: [], ...store.get("calm.profile", {}) },
   saved: cleanSaved(store.get("calm.measurements", [])),
   texts: store.get("calm.texts", {}),
@@ -88,7 +87,7 @@ function renderSummary() {
     h("h2", { class: "sum-title" }, fallback ? "지금 무던함 후보가 없어요" : `${hourLabel(state.hour)}, 무던함 후보 ${count}곳`),
     fallback && h("p", { class: "caption" }, top.length ? "소리를 잰 곳 중 부담이 낮은 순서예요." : "소리를 잰 곳이 아직 없어요."),
     near && h("button", { type: "button", class: "btn sec2", id: "near-slot", onclick: () => {
-      state.day = near.day; state.hour = near.hour; renderAll(); announce(`${hourLabel(near.hour)}로 바꿨어요`);
+      state.day = near.day; state.hour = near.hour; state.moved = true; renderAll(); announce(`${hourLabel(near.hour)}로 바꿨어요`);
     } }, `${near.day === "weekday" ? "평일" : "주말"} ${hourLabel(near.hour)} 보기`),
     h("ul", { class: "list" }, top.map(({ p, sl }) => h("li", null,
       h("button", { type: "button", class: `srow b-${sl.band}`, "data-id": p.id, onclick: () => openPlace(p.id) },
@@ -104,6 +103,7 @@ function renderTop() {
   $("hour").value = state.hour;
   $("hour").setAttribute("aria-valuetext", hourLabel(state.hour));
   $("hour-out").textContent = hourLabel(state.hour);
+  $("slot-note").hidden = state.moved;
   for (const d of ["weekday", "weekend"]) $(`day-${d}`).setAttribute("aria-pressed", String(state.day === d));
 }
 
@@ -183,6 +183,12 @@ function buildProfile() {
         h("li", null, "혼잡은 추정이에요. 소리를 직접 측정하지 않은 곳은 '정보 부족'이에요."),
         h("li", null, "밝기·깜빡임은 센서가 없으면 '미측정'이에요."),
         h("li", null, "소리 분류는 틀릴 수 있어요. 샘플 몇 개로 확인한 시연 단계예요."),
+        h("li", null, "소리 분류는 종류마다 달라요. 평가 녹음에서 맞게 알아본 비율:",
+          h("ul", { class: "rc" }, RECALL.map(([name, , v]) => h("li", null,
+            h("span", null, name),
+            h("i", { "aria-hidden": "true", style: `width:${v / RECALL[RECALL.length - 1][2] * 100}%` }),
+            h("b", null, `${v}%`)))),
+          "기계음·비명·군중 소리는 놓칠 수 있어요."),
         h("li", null, "지수는 환경 정보예요. 아이의 반응을 진단하거나 보장하지 않아요.")),
       h("h3", null, "시연용 가상 측정"),
       h("p", null, "'예시 … (시연용 가상 측정)' 장소는 실제 매장이 아니에요. 보여 주기 위해 만든 값이에요."),
@@ -206,8 +212,8 @@ async function main() {
     removeSaved(i) { state.saved.splice(i, 1); store.set("calm.measurements", state.saved); renderAll(); },
   });
   $("tgl-unknown").addEventListener("click", () => { state.showUnknown = !state.showUnknown; renderAll(); });
-  $("hour").addEventListener("input", (e) => { state.hour = Number(e.target.value); renderAll(); });
-  for (const d of ["weekday", "weekend"]) $(`day-${d}`).addEventListener("click", () => { state.day = d; renderAll(); });
+  $("hour").addEventListener("input", (e) => { state.hour = Number(e.target.value); state.moved = true; renderAll(); });
+  for (const d of ["weekday", "weekend"]) $(`day-${d}`).addEventListener("click", () => { state.day = d; state.moved = true; renderAll(); });
   renderAll();
   document.body.dataset.ready = "1";
 }

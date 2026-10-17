@@ -9,7 +9,65 @@ export const STIMULUS_KO = Object.fromEntries(STIMULI);
 export const KIND_KO = { outdoor: "야외", "public-indoor": "공공 실내", commercial: "상업 시설" };
 
 export const hourLabel = (h) => (h === 0 ? "자정" : h === 12 ? "정오" : `${h < 12 ? "오전" : "오후"} ${h % 12}시`);
-export const dayOf = (d) => (d.getDay() === 0 || d.getDay() === 6 ? "weekend" : "weekday");
+// First view is the same for every visitor (the demo video and report show it); the wall clock would put a weekend evening on an all-red map.
+export const DEFAULT_SLOT = { day: "weekday", hour: 14 };
+// shortcut: name list copied from YAMNet class map rows 294-335 and 337-347 (the vehicle/engine rows groups.js maps to sustained); tests/ui-helpers.test.js checks it against the map. Re-copy if groups.js rows change.
+const VEHICLE_ENGINE = new Set([
+  "Vehicle",
+  "Boat, Water vehicle",
+  "Sailboat, sailing ship",
+  "Rowboat, canoe, kayak",
+  "Motorboat, speedboat",
+  "Ship",
+  "Motor vehicle (road)",
+  "Car",
+  "Vehicle horn, car horn, honking",
+  "Toot",
+  "Car alarm",
+  "Power windows, electric windows",
+  "Skidding",
+  "Tire squeal",
+  "Car passing by",
+  "Race car, auto racing",
+  "Truck",
+  "Air brake",
+  "Air horn, truck horn",
+  "Reversing beeps",
+  "Ice cream truck, ice cream van",
+  "Bus",
+  "Emergency vehicle",
+  "Police car (siren)",
+  "Ambulance (siren)",
+  "Fire engine, fire truck (siren)",
+  "Motorcycle",
+  "Traffic noise, roadway noise",
+  "Rail transport",
+  "Train",
+  "Train whistle",
+  "Train horn",
+  "Railroad car, train wagon",
+  "Train wheels squealing",
+  "Subway, metro, underground",
+  "Aircraft",
+  "Aircraft engine",
+  "Jet engine",
+  "Propeller, airscrew",
+  "Helicopter",
+  "Fixed-wing aircraft, airplane",
+  "Bicycle",
+  "Engine",
+  "Light engine (high frequency)",
+  "Dental drill, dentist's drill",
+  "Lawn mower",
+  "Chainsaw",
+  "Medium engine (mid frequency)",
+  "Heavy engine (low frequency)",
+  "Engine knocking",
+  "Engine starting",
+  "Idling",
+  "Accelerating, revving, vroom"]);
+/** Machine hum (AC, washer, vacuum) is mostly missed by the classifier and tends to surface as vehicle/engine "sustained"; warn then. */
+export const missesMachine = (group, topClass) => group === "sustained" && VEHICLE_ENGINE.has(topClass);
 export const dayKo = (d) => (d === "weekend" ? "주말" : "평일");
 
 /** Chip text of a slot: 무던함 / 후보 / 다소 부담 / 부담 높음 / 정보 부족. */
@@ -182,3 +240,6 @@ export function withSaved(base, saved) {
 export const cleanSaved = (x) =>
   (Array.isArray(x) ? x : []).filter((m) => m && m.summary && typeof m.summary.dbMedian === "number" && (m.placeId || m.custom?.name) &&
     (m.daytype === "weekday" || m.daytype === "weekend") && Number.isInteger(m.hour) && m.hour >= 0 && m.hour <= 23);
+
+/** Held-out per-label recall (%) shown in 내 아이 > 한계, ascending; key = label in tests/perf/results/baseline-heldout.json m1Label. */
+export const RECALL = [["에어컨", "ac", 7], ["세탁기", "washer", 9], ["비명", "scream", 14], ["군중 소리", "crowd", 31], ["청소기", "vacuum", 38]];
