@@ -1,4 +1,4 @@
-// On-device sound classification: mic -> 16 kHz mono -> YAMNet (TF.js) -> group + loudness.
+// On-device sound classification: mic -> 16 kHz mono -> YAMNet (TF.js WASM in a Web Worker) -> group + loudness.
 // Audio lives only in memory (a ~2 s ring of floats); nothing is stored or sent.
 import { decide, chimeScore } from './groups.js';
 
@@ -83,26 +83,19 @@ const MSG = {
   other: '마이크를 시작하지 못했어요.',
 };
 
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = res;
-    s.onerror = () => rej(new Error('script ' + src));
-    document.head.appendChild(s);
-  });
-}
-
 /**
  * @param {{onFrame:Function, onError?:Function, onProgress?:Function, modelBase?:string}} opts
  * onFrame({ts, db, group, groupScores, topClass, topScore, top5, chime}) about every 0.5 s; db = RMS dBFS of last window (uncalibrated).
  * onAnalyser(AnalyserNode|null): mic mode, the analyser on the same source (null on stop). onLevel(db): RMS dBFS of each mic/sample chunk. Both work without the model.
  * Mic mode: the stream path starts at once and the model loads in parallel; a model failure calls onError(msg, {retry:true}) once, the mic stays on, retryModel() retries.
- * onStage('script'|'backend'|'weights'|'warmup'): model load step; onProgress(p): weights fraction, 1 = model ready.
+ * onStage('script'|'backend'|'weights'|'warmup'): model load step (backend..warmup run in the worker); onProgress(p): weights fraction, 1 = model ready.
  */
 export function createListener({ onFrame, onError = () => {}, onProgress = () => {}, onStage = () => {}, onAnalyser = () => {}, onLevel = () => {}, modelBase } = {}) {
   const base = modelBase ?? new URL('../model/yamnet/', import.meta.url).href;
-  let model = null;
+  let worker = null; // survives stop(): the model stays loaded
+  let ready = false;
+  let loading = null; // {res, rej} while the worker initialises
+  let inflight = null; // {mine, ms} of the window the worker is scoring
   let names = null;
   let ctx = null;
   let stream = null;
@@ -121,33 +114,29 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
   const ensureModel = () => (modelP ??= loadModel().catch((e) => ((modelP = null), Promise.reject(e))));
 
   async function loadModel() {
-    const t0 = performance.now();
-    const step = (s) => {
-      stage = s;
-      console.info(`[model] ${s} +${Math.round(performance.now() - t0)}ms`);
-      onStage(s);
-    };
     onProgress(0);
-    step('script');
-    if (!window.tf) await loadScript(new URL('../vendor/tf.min.js', import.meta.url).href);
-    const tf = window.tf;
-    step('backend');
-    let gl = false;
-    try {
-      gl = await tf.setBackend('webgl'); // false (or throws) when WebGL is unavailable
-    } catch {}
-    if (!gl || tf.getBackend() !== 'webgl') await tf.setBackend('cpu');
-    await tf.ready();
-    step('weights');
+    stage = 'script';
+    onStage(stage);
     names = await (await fetch(new URL('../data/yamnet_class_map.json', import.meta.url))).json();
-    const m = await tf.loadGraphModel(base + 'model.json', { onProgress: (p) => p < 1 && onProgress(p) });
-    // warm-up compiles shaders so the first real window is not slow; the model is only used for inference after it
-    step('warmup');
-    const z = tf.zeros([WINDOW]);
-    const o = await m.executeAsync(z);
-    [z, ...(Array.isArray(o) ? o : [o])].forEach((t) => t.dispose());
-    model = m;
-    step('ready');
+    worker?.terminate();
+    ready = busy = false;
+    inflight = null;
+    const w = (worker = new Worker(new URL('./model-worker.js', import.meta.url)));
+    const fail = (msg) => (loading ? loading.rej(new Error(msg)) : w === worker && failWindow(msg));
+    w.onmessage = ({ data: d }) => {
+      if (w !== worker) return;
+      if (d.type === 'stage') onStage((stage = d.stage));
+      else if (d.type === 'progress') onProgress(d.p);
+      else if (d.type === 'ready') loading.res();
+      else if (d.type === 'scores') scored(d);
+      else fail(d.msg);
+    };
+    w.onerror = (e) => fail(e.message || 'worker');
+    await new Promise((res, rej) => {
+      loading = { res, rej };
+      w.postMessage({ type: 'init', modelBase: base, wasmBase: new URL('../vendor/', import.meta.url).href });
+    }).finally(() => (loading = null));
+    ready = true;
     onProgress(1);
   }
 
@@ -168,36 +157,39 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
     );
   }
 
-  async function infer() {
+  function infer() {
     busy = true;
-    const mine = session;
+    const win = ring.slice(ring.length - WINDOW);
+    let ms = 0;
+    for (let i = 0; i < win.length; i++) ms += win[i] * win[i];
+    inflight = { mine: session, ms: ms / win.length };
+    const x = normalise(win); // db stays the original level
+    worker.postMessage({ type: 'win', win: x }, [x.buffer]);
+  }
+
+  /** Worker reply for the window in flight; a result of an older session is dropped. */
+  function scored({ scores, infMs }) {
+    const f = inflight;
+    inflight = null;
+    busy = false;
+    if (!f || f.mine !== session) return;
     try {
-      const win = ring.slice(ring.length - WINDOW);
-      let ms = 0;
-      for (let i = 0; i < win.length; i++) ms += win[i] * win[i];
-      ms /= win.length;
-      const tf = window.tf;
-      const input = tf.tensor1d(normalise(win)); // db below stays the original level
-      const t0 = performance.now();
-      const out = await model.executeAsync(input);
-      const outs = Array.isArray(out) ? out : [out];
-      const t = outs.find((x) => x.shape.length === 2 && x.shape[1] === 521);
-      const scores = t ? await t.mean(0).data() : null;
-      const infMs = performance.now() - t0;
-      [input, ...outs].forEach((x) => x.dispose());
-      if (mine !== session) return;
-      if (!scores) throw new Error('no 521-class output');
-      history.push({ scores, ms, infMs });
+      history.push({ scores, ms: f.ms, infMs });
       if (history.length > HISTORY) history.shift();
       emit();
     } catch (e) {
-      console.error(e);
-      if (mine === session) {
-        stop();
-        onError(MSG.model);
-      }
-    } finally {
-      busy = false;
+      failWindow(e);
+    }
+  }
+
+  function failWindow(e) {
+    console.error(e);
+    const mine = inflight?.mine;
+    inflight = null;
+    busy = false;
+    if (mine === undefined || mine === session) {
+      stop();
+      onError(MSG.model);
     }
   }
 
@@ -233,7 +225,7 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
     for (let i = skip; i < all; i++) merged[w++] = i < ring.length ? ring[i] : r[i - ring.length];
     ring = merged;
     fresh += r.length;
-    if (!busy && model && ring.length >= WINDOW && fresh >= HOP) {
+    if (!busy && ready && ring.length >= WINDOW && fresh >= HOP) {
       fresh = 0;
       infer();
     }

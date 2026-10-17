@@ -3,6 +3,7 @@
 | Component | Source | Licence |
 |---|---|---|
 | TensorFlow.js 4.22.0 (`vendor/tf.min.js`, licence header kept in file) | https://www.tensorflow.org/js | Apache-2.0 (http://www.apache.org/licenses/LICENSE-2.0) |
+| TensorFlow.js WASM backend 4.22.0 (`vendor/tf-backend-wasm.min.js`, `vendor/tfjs-backend-wasm*.wasm`, licence header kept in file) | https://www.npmjs.com/package/@tensorflow/tfjs-backend-wasm | Apache-2.0 (http://www.apache.org/licenses/LICENSE-2.0) |
 | YAMNet TF.js graph model (`model/yamnet/`) | https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1 | Apache-2.0 |
 | YAMNet class names (`data/yamnet_class_map.json`) | tensorflow/models research/audioset/yamnet | Apache-2.0 |
 | Seoul floating population, 2026-06/07, Seongdong-gu (`data/places.json`) | https://data.seoul.go.kr/dataList/OA-14991/S/1/datasetView.do | KOGL Type 1 (공공누리 1유형, attribution) |
