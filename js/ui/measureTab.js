@@ -29,7 +29,7 @@ export function createMeasureTab(ctx) {
   const root = ctx.root;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let listener = null, meas = null, running = false, kind = "mic", lux = null, sensor = null, sampleFile = SAMPLES[0][0];
-  let firstTs = 0, lastSudden = 0, suddenAt = null, final = null, savedOnce = false, hasFrame = false, lastMeter = 0, lastAnn = 0, lastGroup = "", status = "", pickedNew = false;
+  let clock = null, t0 = 0, lastSudden = 0, suddenAt = null, final = null, savedOnce = false, hasFrame = false, lastMeter = 0, lastAnn = 0, lastGroup = "", status = "", pickedNew = false;
 
   // context row
   const place = h("select", { id: "m-place", "aria-label": "장소", onchange: () => { pickedNew = place.value === NEW; if (pickedNew) placeSheet.open(); else { syncNew(); fillPlaces(); } } });
@@ -58,7 +58,8 @@ export function createMeasureTab(ctx) {
   const wave = createWave(canvas, { reducedMotion: reduced });
   const hint = h("div", { class: "hint", role: "status" });
   const errEl = h("div", { class: "hint err", role: "alert", hidden: true });
-  const wavebox = h("div", { class: "wavebox" }, canvas, hint, errEl);
+  const retryBtn = h("button", { type: "button", class: "btn sec2", id: "m-retry", hidden: true, onclick: () => retryModel() }, "다시 시도");
+  const wavebox = h("div", { class: "wavebox" }, canvas, hint, errEl, retryBtn);
   const gIc = ic("ear"), gIcBox = h("span", { class: "gi" }, gIc);
   const gEl = h("div", { class: "big-group" }, "소리 대기"), enEl = h("div", { class: "en", lang: "en" }, " ");
   const dbEl = h("div", { class: "db" }), meter = h("span", { class: "sr", role: "meter", "aria-label": "상대 소리 크기", "aria-valuemin": "-100", "aria-valuemax": "0" });
@@ -114,7 +115,7 @@ export function createMeasureTab(ctx) {
     if (!hasFrame) { gEl.textContent = status || "소리 대기"; gEl.classList.toggle("st", !!status); } // loading text lives in the name slot, not over the wave
   }
   function setError(msg) {
-    errEl.hidden = !msg; errEl.textContent = msg ?? "";
+    errEl.hidden = !msg; errEl.textContent = msg ?? ""; errEl.classList.remove("model"); retryBtn.hidden = true;
     smpBtn.classList.toggle("hl", !!msg && kind === "mic");
     syncHint();
   }
@@ -129,26 +130,38 @@ export function createMeasureTab(ctx) {
   }
 
   function resetLive() {
-    hasFrame = false; firstTs = 0; lastGroup = "";
+    hasFrame = false; stopClock(); lastGroup = "";
     gEl.textContent = "소리 대기"; gEl.classList.remove("st"); enEl.textContent = " "; dbEl.textContent = ""; timeEl.textContent = "00:00";
     gIc.firstChild.setAttribute("href", "vendor/icons/sprite.svg#ear"); gIcBox.classList.remove("calm");
     chipSudden.hidden = true; chipAnn.hidden = true;
   }
 
+  // own clock: starts when the audio path is up (stream attached or first chunk), not at the first model frame
+  function startClock() {
+    if (clock) return;
+    t0 = Date.now();
+    clock = setInterval(() => (timeEl.textContent = mmss((Date.now() - t0) / 1000)), 250);
+  }
+  function stopClock() { clearInterval(clock); clock = null; }
+
+  function modelFailed(msg) { // mic stays on; only the model load can be retried
+    setStatus(""); setError(msg); errEl.classList.add("model"); retryBtn.hidden = false;
+  }
+  function retryModel() {
+    setError(null); setStatus("분석 모델 불러오는 중"); listener.retryModel();
+  }
+
   function onFrame(f) {
     if (!hasFrame) { hasFrame = true; status = ""; gEl.classList.remove("st"); syncHint(); }
     wave.frame(f.db);
-    if (!firstTs) firstTs = f.ts;
     meas.push(f);
     const s = meas.summary();
     gEl.textContent = GROUP_KO[f.group];
     gIc.firstChild.setAttribute("href", `vendor/icons/sprite.svg#${GROUP_ICON[f.group]}`);
     gIcBox.classList.toggle("calm", f.group === "calm");
     enEl.textContent = `${f.topClass} ${Math.round(f.topScore * 100)}%`;
-    dbEl.textContent = `${f.db.toFixed(0)} dB`;
     if (f.ts - lastMeter >= 1000) { lastMeter = f.ts; meter.setAttribute("aria-valuenow", f.db.toFixed(0)); }
     if (f.group !== lastGroup && f.ts - lastAnn >= 5000) { lastAnn = f.ts; lastGroup = f.group; ctx.announce(GROUP_KO[f.group]); }
-    timeEl.textContent = mmss((f.ts - firstTs) / 1000);
     if (s.suddenCount > lastSudden) {
       lastSudden = s.suddenCount;
       suddenAt = new Date(f.ts).toLocaleTimeString("ko-KR");
@@ -170,19 +183,23 @@ export function createMeasureTab(ctx) {
     } catch { sensor = null; } // no sensor or permission: brightness stays 미측정
     listener = createListener({
       onFrame,
-      onAnalyser: (a) => (a ? wave.attach(a) : wave.detach()),
-      onLevel: (db) => wave.feed(db),
-      onError: (m) => { abort(); setError(m); },
-      onProgress: (p) => { if (p < 1 && !hasFrame) setStatus(`분석 모델 불러오는 중 ${Math.round(p * 100)}%`); },
+      onAnalyser: (a) => { if (a) { wave.attach(a); startClock(); } else wave.detach(); },
+      onLevel: (db) => { startClock(); if (kind === "sample") wave.feed(db); dbEl.textContent = `${db.toFixed(0)} dB`; },
+      onError: (m, o) => { if (o?.retry && kind === "mic") modelFailed(m); else { abort(); setError(m); } },
+      onStage: (st) => { if (!hasFrame && st === "warmup") setStatus("분석 모델 첫 실행 준비 중"); },
+      onProgress: (p) => {
+        if (p >= 1) { if (!retryBtn.hidden) setError(null); if (!hasFrame) setStatus(""); return; }
+        if (!hasFrame) setStatus(`분석 모델 불러오는 중 ${Math.round(p * 100)}%`);
+      },
     });
     if (k === "mic") await listener.start();
     else await listener.usingSample(`samples/${sampleFile}.wav`);
   }
 
-  function abort() { listener?.stop(); try { sensor?.stop(); } catch {} sensor = null; setRunning(false); resetLive(); setStatus(""); }
+  function abort() { stopClock(); listener?.stop(); try { sensor?.stop(); } catch {} sensor = null; setRunning(false); resetLive(); setStatus(""); }
 
   function stop() {
-    listener?.stop(); try { sensor?.stop(); } catch {} sensor = null;
+    stopClock(); listener?.stop(); try { sensor?.stop(); } catch {} sensor = null;
     setRunning(false); setStatus("");
     final = meas.summary();
     resetLive(); syncHint();

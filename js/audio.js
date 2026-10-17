@@ -72,11 +72,14 @@ export function normalise(win) {
 const CHIME_MIN = 0.3;
 const SILENCE = 494; // YAMNet class "Silence", reported for diagnostics
 
+const MODEL_GUARD_MS = 45000; // model load longer than this is shown as an error (the load itself keeps going)
+
 const MSG = {
   denied: '마이크 권한이 거부됐어요. 브라우저 설정에서 허용하거나 샘플 소리로 체험해 보세요.',
   nomic: '사용할 수 있는 마이크가 없어요. 샘플 소리로 체험해 보세요.',
   insecure: '이 주소에서는 마이크를 쓸 수 없어요 (HTTPS 필요). 샘플 소리로 체험해 보세요.',
   model: '소리 분석 모델을 불러오지 못했어요. 새로고침 후 다시 시도해 주세요.',
+  modelStage: (stage) => `소리 분석 모델을 불러오지 못했어요 (단계: ${stage})`,
   other: '마이크를 시작하지 못했어요.',
 };
 
@@ -93,9 +96,11 @@ function loadScript(src) {
 /**
  * @param {{onFrame:Function, onError?:Function, onProgress?:Function, modelBase?:string}} opts
  * onFrame({ts, db, group, groupScores, topClass, topScore, top5, chime}) about every 0.5 s; db = RMS dBFS of last window (uncalibrated).
- * onAnalyser(AnalyserNode|null): mic mode, the analyser on the same source (null on stop). onLevel(db): sample mode, RMS dBFS of each 100 ms chunk. Both only drive the live wave.
+ * onAnalyser(AnalyserNode|null): mic mode, the analyser on the same source (null on stop). onLevel(db): RMS dBFS of each mic/sample chunk. Both work without the model.
+ * Mic mode: the stream path starts at once and the model loads in parallel; a model failure calls onError(msg, {retry:true}) once, the mic stays on, retryModel() retries.
+ * onStage('script'|'backend'|'weights'|'warmup'): model load step; onProgress(p): weights fraction, 1 = model ready.
  */
-export function createListener({ onFrame, onError = () => {}, onProgress = () => {}, onAnalyser = () => {}, onLevel = () => {}, modelBase } = {}) {
+export function createListener({ onFrame, onError = () => {}, onProgress = () => {}, onStage = () => {}, onAnalyser = () => {}, onLevel = () => {}, modelBase } = {}) {
   const base = modelBase ?? new URL('../model/yamnet/', import.meta.url).href;
   let model = null;
   let names = null;
@@ -107,27 +112,60 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
   let ring = new Float32Array(0);
   let fresh = 0; // samples since last inference
   let busy = false;
-    let history = []; // {scores:Float32Array, ms:number}
+  let history = []; // {scores:Float32Array, ms:number}
   let session = 0;
+  let modelP = null;
+  let stage = '';
+  let guard = 0;
 
-  async function ensureModel() {
-    if (model) return;
+  const ensureModel = () => (modelP ??= loadModel().catch((e) => ((modelP = null), Promise.reject(e))));
+
+  async function loadModel() {
+    const t0 = performance.now();
+    const step = (s) => {
+      stage = s;
+      console.info(`[model] ${s} +${Math.round(performance.now() - t0)}ms`);
+      onStage(s);
+    };
     onProgress(0);
+    step('script');
     if (!window.tf) await loadScript(new URL('../vendor/tf.min.js', import.meta.url).href);
     const tf = window.tf;
+    step('backend');
     let gl = false;
     try {
       gl = await tf.setBackend('webgl'); // false (or throws) when WebGL is unavailable
     } catch {}
     if (!gl || tf.getBackend() !== 'webgl') await tf.setBackend('cpu');
     await tf.ready();
+    step('weights');
     names = await (await fetch(new URL('../data/yamnet_class_map.json', import.meta.url))).json();
-    model = await tf.loadGraphModel(base + 'model.json', { onProgress });
-    // warm-up compiles shaders so the first real window is not slow
+    const m = await tf.loadGraphModel(base + 'model.json', { onProgress: (p) => p < 1 && onProgress(p) });
+    // warm-up compiles shaders so the first real window is not slow; the model is only used for inference after it
+    step('warmup');
     const z = tf.zeros([WINDOW]);
-    const o = await model.executeAsync(z);
+    const o = await m.executeAsync(z);
     [z, ...(Array.isArray(o) ? o : [o])].forEach((t) => t.dispose());
+    model = m;
+    step('ready');
     onProgress(1);
+  }
+
+  /** Mic mode: load the model without blocking the stream; error once (load failure or guard timeout), the load continues. */
+  function loadInBackground() {
+    const mine = session;
+    let failed = false;
+    const fail = () => {
+      if (failed || mine !== session) return;
+      failed = true;
+      onError(MSG.modelStage(stage), { retry: true });
+    };
+    clearTimeout(guard);
+    guard = setTimeout(fail, MODEL_GUARD_MS);
+    ensureModel().then(
+      () => clearTimeout(guard),
+      (e) => (clearTimeout(guard), console.error(e), fail()),
+    );
   }
 
   async function infer() {
@@ -211,6 +249,7 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
 
   function stop() {
     session++;
+    clearTimeout(guard);
     onAnalyser(null);
     clearInterval(timer);
     timer = null;
@@ -246,25 +285,25 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
           stop();
           return onError(e.name === 'NotFoundError' || e.name === 'OverconstrainedError' ? MSG.nomic : MSG.denied);
         }
-        try {
-          await ensureModel();
-        } catch (e) {
-          console.error(e);
-          stop();
-          return onError(MSG.model);
-        }
         if (ctx !== myCtx) return; // stopped meanwhile
         reset(ctx.sampleRate);
         const src = ctx.createMediaStreamSource(stream);
         // shortcut: ScriptProcessor is deprecated but works on every browser, upgrade to AudioWorklet if it is removed
         node = ctx.createScriptProcessor(4096, 1, 1);
-        node.onaudioprocess = (e) => push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        node.onaudioprocess = (e) => {
+          const chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+          let ms = 0;
+          for (let i = 0; i < chunk.length; i++) ms += chunk[i] * chunk[i];
+          onLevel(toDb(ms / chunk.length));
+          push(chunk);
+        };
         src.connect(node);
         const an = ctx.createAnalyser();
         an.fftSize = 1024;
         src.connect(an);
         onAnalyser(an);
         node.connect(ctx.destination); // output stays silent: outputBuffer is never written
+        loadInBackground();
       } catch (e) {
         console.error(e);
         stop();
@@ -272,6 +311,7 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
       }
     },
     stop,
+    retryModel: loadInBackground,
     /** Run a bundled WAV (looped, real-time paced) through the same pipeline. */
     async usingSample(url) {
       stop();
