@@ -80,3 +80,23 @@ export function chimeScore(scores) {
 }
 
 export const TABLE_ROWS = TABLE;
+
+const NAMED_MIN = 0.15; // not tuned on real data
+
+/**
+ * The app's group decision over the last windows: mean of the score vectors, group sums, top-5 classes.
+ * "other" is the sum of ~230 unassigned classes, so diffuse mass would beat a real but narrow group:
+ * named groups compete first; other wins only when none reaches NAMED_MIN.
+ * @param {{scores:ArrayLike<number>}[]} history @param {string[]} names class names
+ */
+export function decide(history, names) {
+  const n = history.length;
+  const mean = new Float32Array(521);
+  for (const h of history) for (let i = 0; i < 521; i++) mean[i] += h.scores[i] / n;
+  const gs = groupScores(mean);
+  const named = Object.keys(gs).filter((g) => g !== 'other');
+  const best = named.reduce((a, b) => (gs[b] > gs[a] ? b : a));
+  const group = gs[best] >= NAMED_MIN ? best : 'other';
+  const idx = Array.from(mean.keys()).sort((a, b) => mean[b] - mean[a]).slice(0, 5);
+  return { group, groupScores: gs, top5: idx.map((i) => ({ name: names?.[i], score: mean[i] })) };
+}

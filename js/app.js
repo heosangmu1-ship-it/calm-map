@@ -122,6 +122,8 @@ function selectTab(name, focus = true) {
     $(`tab-${t}`).tabIndex = t === name ? 0 : -1;
   });
   $("day-weekday").parentElement.hidden = name !== "map"; // day is chosen on the map tab; 측정 has its own select
+  $("hist-btn").hidden = name !== "measure";
+  document.body.dataset.tab = name; // 측정 is a one-screen layout (css)
   window.scrollTo(0, 0);
   if (focus) $(`tab-${name}`).focus();
 }
@@ -190,7 +192,7 @@ async function main() {
   bindTabs();
   sheet = createSheet($("sheet"), () => { state.selected = null; renderMap(); });
   measureTab = createMeasureTab({
-    root: $("panel-measure"), dongs: dongsOf(state.base), get day() { return state.day; }, get hour() { return state.hour; },
+    root: $("panel-measure"), announce, historyBtn: $("hist-btn"), dongs: dongsOf(state.base), get day() { return state.day; }, get hour() { return state.hour; },
     places: () => all, saved: () => state.saved,
     addSaved(entry) { state.saved.push(entry); store.set("calm.measurements", state.saved); renderAll(); announce("측정을 저장했어요"); },
     removeSaved(i) { state.saved.splice(i, 1); store.set("calm.measurements", state.saved); renderAll(); },

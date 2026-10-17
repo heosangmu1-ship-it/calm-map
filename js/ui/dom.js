@@ -33,3 +33,6 @@ export const store = {
     } catch {}
   },
 };
+
+/** Lucide icon from the vendored sprite; decorative (the control or text beside it carries the name). */
+export const ic = (name, cls = "") => s("svg", { class: `ic ${cls}`.trim(), "aria-hidden": "true" }, s("use", { href: `vendor/icons/sprite.svg#${name}` }));

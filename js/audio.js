@@ -1,6 +1,6 @@
 // On-device sound classification: mic -> 16 kHz mono -> YAMNet (TF.js) -> group + loudness.
 // Audio lives only in memory (a ~2 s ring of floats); nothing is stored or sent.
-import { groupScores, chimeScore } from './groups.js';
+import { decide, chimeScore } from './groups.js';
 
 export const RATE = 16000;
 export const WINDOW = 15600; // one YAMNet frame, 0.975 s
@@ -52,9 +52,25 @@ export function toDb(meanSquare) {
   return Math.max(-100, 10 * Math.log10(meanSquare + 1e-10));
 }
 
+// Phone mics with AGC off deliver -50..-65 dBFS speech/traffic; YAMNet's log-mel has a fixed offset, so such
+// input reads as class "Silence". Raise quiet windows to NORM_TARGET_DB; below NORM_FLOOR_DB it is a really quiet room: leave it.
+// Measured: docs/QUIET-BUG.md. Floor/target are not tuned on real phone data.
+export const NORM_TARGET_DB = -30;
+export const NORM_FLOOR_DB = -68;
+
+/** Software gain for the model input only (never attenuates, clamps to [-1,1]). @param {Float32Array} win @returns {Float32Array} */
+export function normalise(win) {
+  let ms = 0;
+  for (let i = 0; i < win.length; i++) ms += win[i] * win[i];
+  const db = toDb(ms / win.length);
+  if (db < NORM_FLOOR_DB || db >= NORM_TARGET_DB) return win;
+  const k = 10 ** ((NORM_TARGET_DB - db) / 20);
+  return win.map((v) => Math.max(-1, Math.min(1, v * k)));
+}
+
 // chime flag: strongest Chime/Doorbell/Ding-dong class in the last window above this score. Not tuned on real data.
 const CHIME_MIN = 0.3;
-const NAMED_MIN = 0.15;
+const SILENCE = 494; // YAMNet class "Silence", reported for diagnostics
 
 const MSG = {
   denied: '마이크 권한이 거부됐어요. 브라우저 설정에서 허용하거나 샘플 소리로 체험해 보세요.',
@@ -77,8 +93,9 @@ function loadScript(src) {
 /**
  * @param {{onFrame:Function, onError?:Function, onProgress?:Function, modelBase?:string}} opts
  * onFrame({ts, db, group, groupScores, topClass, topScore, top5, chime}) about every 0.5 s; db = RMS dBFS of last window (uncalibrated).
+ * onAnalyser(AnalyserNode|null): mic mode, the analyser on the same source (null on stop). onLevel(db): sample mode, RMS dBFS of each 100 ms chunk. Both only drive the live wave.
  */
-export function createListener({ onFrame, onError = () => {}, onProgress = () => {}, modelBase } = {}) {
+export function createListener({ onFrame, onError = () => {}, onProgress = () => {}, onAnalyser = () => {}, onLevel = () => {}, modelBase } = {}) {
   const base = modelBase ?? new URL('../model/yamnet/', import.meta.url).href;
   let model = null;
   let names = null;
@@ -98,10 +115,12 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
     onProgress(0);
     if (!window.tf) await loadScript(new URL('../vendor/tf.min.js', import.meta.url).href);
     const tf = window.tf;
+    let gl = false;
     try {
-      await tf.setBackend('webgl');
+      gl = await tf.setBackend('webgl'); // false (or throws) when WebGL is unavailable
     } catch {}
-    if (!(await tf.ready()) || tf.getBackend() !== 'webgl') await tf.setBackend('cpu');
+    if (!gl || tf.getBackend() !== 'webgl') await tf.setBackend('cpu');
+    await tf.ready();
     names = await (await fetch(new URL('../data/yamnet_class_map.json', import.meta.url))).json();
     model = await tf.loadGraphModel(base + 'model.json', { onProgress });
     // warm-up compiles shaders so the first real window is not slow
@@ -120,15 +139,17 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
       for (let i = 0; i < win.length; i++) ms += win[i] * win[i];
       ms /= win.length;
       const tf = window.tf;
-      const input = tf.tensor1d(win);
+      const input = tf.tensor1d(normalise(win)); // db below stays the original level
+      const t0 = performance.now();
       const out = await model.executeAsync(input);
       const outs = Array.isArray(out) ? out : [out];
       const t = outs.find((x) => x.shape.length === 2 && x.shape[1] === 521);
       const scores = t ? await t.mean(0).data() : null;
+      const infMs = performance.now() - t0;
       [input, ...outs].forEach((x) => x.dispose());
       if (mine !== session) return;
       if (!scores) throw new Error('no 521-class output');
-      history.push({ scores, ms });
+      history.push({ scores, ms, infMs });
       if (history.length > HISTORY) history.shift();
       emit();
     } catch (e) {
@@ -144,16 +165,7 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
 
   function emit() {
     const n = history.length;
-    const mean = new Float32Array(521);
-    for (const h of history) for (let i = 0; i < 521; i++) mean[i] += h.scores[i] / n;
-    const gs = groupScores(mean);
-    // "other" is the sum of ~230 unassigned classes, so diffuse mass would beat a real but narrow group.
-    // Named groups compete first; other wins only when none reaches NAMED_MIN (not tuned on real data).
-    const named = Object.keys(gs).filter((g) => g !== 'other');
-    const best = named.reduce((a, b) => (gs[b] > gs[a] ? b : a));
-    const group = gs[best] >= NAMED_MIN ? best : 'other';
-    const idx = Array.from(mean.keys()).sort((a, b) => mean[b] - mean[a]).slice(0, 5);
-    const top5 = idx.map((i) => ({ name: names[i], score: mean[i] }));
+    const { group, groupScores: gs, top5 } = decide(history, names);
     const last = history[n - 1];
     onFrame({
       ts: Date.now(),
@@ -164,6 +176,10 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
       topScore: top5[0].score,
       top5,
       chime: chimeScore(last.scores) >= CHIME_MIN,
+      silence: history.reduce((a, h) => a + h.scores[SILENCE], 0) / n,
+      infMs: last.infMs,
+      ctxState: ctx?.state,
+      sampleRate: ctx?.sampleRate,
     });
   }
 
@@ -195,6 +211,7 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
 
   function stop() {
     session++;
+    onAnalyser(null);
     clearInterval(timer);
     timer = null;
     if (node) {
@@ -243,6 +260,10 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
         node = ctx.createScriptProcessor(4096, 1, 1);
         node.onaudioprocess = (e) => push(new Float32Array(e.inputBuffer.getChannelData(0)));
         src.connect(node);
+        const an = ctx.createAnalyser();
+        an.fftSize = 1024;
+        src.connect(an);
+        onAnalyser(an);
         node.connect(ctx.destination); // output stays silent: outputBuffer is never written
       } catch (e) {
         console.error(e);
@@ -265,7 +286,11 @@ export function createListener({ onFrame, onError = () => {}, onProgress = () =>
         const step = Math.round(buf.sampleRate * 0.1);
         let p = 0;
         timer = setInterval(() => {
-          push(data.slice(p, p + step));
+          const chunk = data.slice(p, p + step);
+          let ms = 0;
+          for (let i = 0; i < chunk.length; i++) ms += chunk[i] * chunk[i];
+          onLevel(toDb(ms / chunk.length));
+          push(chunk);
           p = p + step >= data.length ? 0 : p + step;
         }, 100);
       } catch (e) {
