@@ -84,7 +84,7 @@ input[type="range"] { width: 100%; height: 48px; margin: 4px 0; accent-color: va
   width: 100%; min-height: 64px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; text-align: left;
   background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 8px 12px;
 }
-.item .name, .srow .name { font-size: 17px; font-weight: 600; display: block; }
+.item .name, .srow .name { font-size: 17px; font-weight: 600; display: block; word-break: keep-all; }
 .item .meta, .srow .meta { color: var(--ink-2); font-size: 13px; display: block; }
 .hour { padding: 8px 16px; }
 .hour input[type="range"] { margin: 0; }
@@ -97,6 +97,7 @@ input[type="range"] { width: 100%; height: 48px; margin: 4px 0; accent-color: va
   display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px; border-radius: 14px; font-size: 13px; font-weight: 600;
   background: var(--t); border: 1px solid var(--c); color: var(--ink); white-space: nowrap;
 }
+.chip.tent { background: transparent; border-style: dashed; }
 .chip.b-unknown { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--unknown) 25%, var(--surface)) 0 2px, var(--surface) 2px 7px); }
 .chip.plain { --t: var(--surface); --c: var(--line); font-weight: 400; }
 .chip.big { font-size: 17px; min-height: 40px; padding: 4px 14px; border-radius: 20px; }
@@ -192,6 +193,7 @@ body[data-tab="measure"] main { flex: 1; min-height: 0; }
 .wavebox { position: relative; flex: 1 1 0; min-height: 96px; max-height: 400px; display: grid; align-items: center; }
 #m-wave { display: block; width: 100%; height: 100%; }
 .hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; text-align: center; font-size: 15px; color: var(--ink-2); pointer-events: none; }
+.wavebox .hint:not(.err) { background: var(--surface); padding: 2px 12px; border-radius: 12px; z-index: 1; }
 .hint .ic { width: 16px; height: 16px; }
 .hint.err { margin: 0; border: 0; color: var(--ink); background: color-mix(in srgb, var(--high) 18%, var(--surface)); border-radius: 12px; overflow: hidden; }
 .hint.err.model { inset: auto 0 0 0; padding: 10px 12px 56px; }

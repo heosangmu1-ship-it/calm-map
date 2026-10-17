@@ -17,6 +17,9 @@ export const bandText = (sl) => (sl.band === "unknown" ? "정보 부족" : sl.ba
 /** Provenance tag next to a number: demo seeds are never called plain 측정. */
 export const sourceTag = (place, sl) => (sl.measured ? (place.demo ? "시연용 가상 측정" : "측정") : "추정");
 
+/** Row name: the demo suffix moves to a 시연용 tag (map banner and sheet carry the full words). */
+export const shortName = (p) => (p.demo ? p.name.replace(/ ?\(시연용 가상 측정\)$/, "") : p.name);
+
 const REASON = {
   soundType: "소리 종류가 주된 부담", soundVolume: "소리 크기가 주된 부담", crowd: "사람 많음이 주된 부담",
   brightness: "밝기가 주된 부담", caution: "주의: 민감하다고 설정한 소리가 있어요", insufficient: "혼잡 정보만 있어요",
@@ -137,6 +140,18 @@ export function summarize(rows) {
   const calm = sorted.filter((r) => r.sl.band === "calm");
   if (calm.length) return { count: calm.length, rows: calm.slice(0, 3), fallback: false };
   return { count: 0, rows: sorted.filter((r) => r.sl.band !== "unknown").slice(0, 3), fallback: true };
+}
+
+/**
+ * Nearest (day, hour) with a calm place, or null. bandAt(day, hour) -> true when some place is calm then.
+ * Ties on |hour diff|: same day first, then the other day. Current slot is not considered.
+ */
+export function nearestCalmSlot(day, hour, bandAt) {
+  const other = day === "weekday" ? "weekend" : "weekday";
+  for (let d = 0; d <= 12; d++) for (const [dy, hr] of [[day, hour + d], [day, hour - d], [other, hour + d], [other, hour - d]]) {
+    if (hr >= 0 && hr <= 23 && !(dy === day && d === 0) && bandAt(dy, hr)) return { day: dy, hour: hr };
+  }
+  return null;
 }
 
 export const customId = (c) => `custom:${c.dongCode}:${c.name}`;

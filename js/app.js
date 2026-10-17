@@ -2,7 +2,7 @@
 // Stored in localStorage: calm.profile, calm.measurements (summary numbers only), calm.texts (edited sentences). Never audio.
 import { slot } from "./index.js";
 import { h, s, store } from "./ui/dom.js";
-import { GLYPH, STIMULI, bandText, cleanSaved, dayOf, dongLabels, dongsOf, frame, hourLabel, nudge, project, reasonLine, sortRows, sourceTag, summarize, withSaved, KIND_KO } from "./ui/helpers.js";
+import { GLYPH, STIMULI, bandText, cleanSaved, dayOf, dongLabels, dongsOf, frame, hourLabel, nearestCalmSlot, nudge, project, reasonLine, shortName, sortRows, sourceTag, summarize, withSaved, KIND_KO } from "./ui/helpers.js";
 import { RIVER } from "./ui/river.js";
 import { createSheet } from "./ui/sheet.js";
 import { createMeasureTab } from "./ui/measureTab.js";
@@ -66,12 +66,16 @@ function renderMap() {
 
 const shown = () => all.map((p) => ({ p, sl: slots.get(p.id) })).filter(({ sl }) => state.showUnknown || sl.band !== "unknown");
 
+const nameMeta = (p, meta) => [h("span", { class: "name" }, shortName(p)),
+  h("span", { class: "meta" }, p.demo && !meta.includes("시연용") && h("span", { class: "demo-tag" }, "시연용"), p.demo && !meta.includes("시연용") && " ", meta)];
+const chip = (sl) => h("span", { class: `chip b-${sl.band}${bandText(sl) === "후보" ? " tent" : ""}` }, h("span", { "aria-hidden": "true" }, GLYPH[sl.band]), bandText(sl));
+
 function renderList() {
   const rows = sortRows(shown());
   $("list").replaceChildren(...rows.map(({ p, sl }) => h("li", null,
     h("button", { type: "button", class: `item b-${sl.band}`, "data-id": p.id, "data-band": sl.band, onclick: () => openPlace(p.id) },
-      h("span", { class: `chip b-${sl.band}` }, h("span", { "aria-hidden": "true" }, GLYPH[sl.band]), bandText(sl)),
-      h("span", null, h("span", { class: "name" }, p.name), h("span", { class: "meta" }, `${KIND_KO[p.kind]}${p.custom ? " · 내가 측정" : ""} · ${reasonLine(sl)}${sl.status === "ok" ? ` (${sourceTag(p, sl)})` : " (추정)"}`)),
+      chip(sl),
+      h("span", null, ...nameMeta(p, `${KIND_KO[p.kind]}${p.custom ? " · 내가 측정" : ""} · ${reasonLine(sl)}${sl.status === "ok" ? ` (${sourceTag(p, sl)})` : " (추정)"}`)),
       h("span", { class: "chev", "aria-hidden": "true" }, "›")))));
 }
 
@@ -79,13 +83,17 @@ function renderSummary() {
   const rows = all.map((p) => ({ p, sl: slots.get(p.id) }));
   const { count, rows: top, fallback } = summarize(rows);
   const unknown = rows.filter((r) => r.sl.band === "unknown").length;
+  const near = fallback && nearestCalmSlot(state.day, state.hour, (d, hr) => all.some((p) => slot(p, d, hr, all, state.profile).band === "calm"));
   $("summary").replaceChildren(...[
     h("h2", { class: "sum-title" }, fallback ? "지금 무던함 후보가 없어요" : `${hourLabel(state.hour)}, 무던함 후보 ${count}곳`),
     fallback && h("p", { class: "caption" }, top.length ? "소리를 잰 곳 중 부담이 낮은 순서예요." : "소리를 잰 곳이 아직 없어요."),
+    near && h("button", { type: "button", class: "btn sec2", id: "near-slot", onclick: () => {
+      state.day = near.day; state.hour = near.hour; renderAll(); announce(`${hourLabel(near.hour)}로 바꿨어요`);
+    } }, `${near.day === "weekday" ? "평일" : "주말"} ${hourLabel(near.hour)} 보기`),
     h("ul", { class: "list" }, top.map(({ p, sl }) => h("li", null,
       h("button", { type: "button", class: `srow b-${sl.band}`, "data-id": p.id, onclick: () => openPlace(p.id) },
-        h("span", { class: `chip b-${sl.band}` }, h("span", { "aria-hidden": "true" }, GLYPH[sl.band]), bandText(sl)),
-        h("span", null, h("span", { class: "name" }, p.name), h("span", { class: "meta" }, `${reasonLine(sl)}${p.demo ? "" : ` (${sourceTag(p, sl)})`}`)), // demo names already carry 시연용 가상 측정
+        chip(sl),
+        h("span", null, ...nameMeta(p, `${reasonLine(sl)}${p.demo ? "" : ` (${sourceTag(p, sl)})`}`)),
         h("span", { class: "chev", "aria-hidden": "true" }, "›")))))].filter(Boolean));
   const tgl = $("tgl-unknown");
   tgl.textContent = `${state.showUnknown ? "✓ " : ""}정보 부족 ${unknown}곳 포함`;

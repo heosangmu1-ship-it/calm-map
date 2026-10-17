@@ -31,7 +31,7 @@ export function createMeasureTab(ctx) {
   const root = ctx.root;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let listener = null, meas = null, running = false, kind = "mic", lux = null, sensor = null, sampleFile = SAMPLES[0][0];
-  let clock = null, t0 = 0, lastSudden = 0, suddenAt = null, final = null, savedOnce = false, hasFrame = false, lastMeter = 0, lastAnn = 0, lastGroup = "", status = "", pickedNew = false;
+  let clock = null, t0 = 0, lastSudden = 0, suddenAt = null, final = null, savedOnce = false, hasFrame = false, lastMeter = 0, lastAnn = 0, lastGroup = "", status = "", savedMsg = "", pickedNew = false;
 
   // context row
   const place = h("select", { id: "m-place", "aria-label": "장소", onchange: () => { pickedNew = place.value === NEW; if (pickedNew) placeSheet.open(); else { syncNew(); fillPlaces(); } } });
@@ -113,7 +113,7 @@ export function createMeasureTab(ctx) {
 
   function btn(b, icon, text, label) { b.replaceChildren(ic(icon), h("span", null, text)); b.setAttribute("aria-label", label); }
   function syncHint() {
-    hint.replaceChildren(ic("mic"), IDLE_HINT); hint.hidden = hasFrame || !!status || !errEl.hidden;
+    hint.replaceChildren(ic("mic"), savedMsg || IDLE_HINT); hint.hidden = hasFrame || !!status || !errEl.hidden;
     if (!hasFrame) { gEl.textContent = status || "소리 대기"; gEl.classList.toggle("st", !!status); } // loading text lives in the name slot, not over the wave
   }
   function setError(msg) {
@@ -176,7 +176,7 @@ export function createMeasureTab(ctx) {
   }
 
   async function begin(k) {
-    kind = k; final = null; savedOnce = false; lastSudden = 0; suddenAt = null; lux = null; lastAnn = 0;
+    kind = k; final = null; savedOnce = false; savedMsg = ""; lastSudden = 0; suddenAt = null; lux = null; lastAnn = 0;
     meas = createMeasurement();
     resetLive(); setRunning(true); setError(null);
     wave.detach();
@@ -235,7 +235,7 @@ export function createMeasureTab(ctx) {
     } else entry.placeId = place.value;
     savedOnce = true;
     ctx.addSaved(entry);
-    resultSheet.body.replaceChildren(h("p", { class: "lbl", role: "status" }, "저장했어요. 지도와 목록에 반영됐어요."));
+    resultSheet.close(); savedMsg = "저장했어요. 지도와 목록에 반영됐어요."; syncHint(); // hint is the role=status line on the 측정 screen; cleared by begin()
     fillPlaces();
   }
 
