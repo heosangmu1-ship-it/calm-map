@@ -9,6 +9,8 @@ const SAMPLES = [
   ["restaurant", "붐비는 식당"], ["quiet-then-siren", "조용하다 사이렌"], ["siren", "사이렌"], ["traffic", "도로 소음"], ["crowd", "사람들 웅성임"],
   ["speech", "말소리"], ["music", "음악"], ["birds", "새소리"], ["baby-cry", "아기 울음"], ["chainsaw", "전기톱"], ["street-sweeper", "청소차"],
 ];
+// live frames carry sound classes; the band hue uses the load tokens. Groups without a hue (speech, other) keep the idle accent wave; grey unknown means "no information"
+const HUE = { calm: "calm", alarm: "high", loudhuman: "high", mechanical: "moderate", sustained: "moderate" };
 const GROUP_ICON = { alarm: "bell-ring", loudhuman: "megaphone", mechanical: "cog", sustained: "audio-lines", speech: "message-circle", calm: "leaf", other: "ear" };
 const NEW = "__new";
 const IDLE_HINT = "시작을 누르면 파형이 보여요";
@@ -131,7 +133,7 @@ export function createMeasureTab(ctx) {
 
   function resetLive() {
     hasFrame = false; stopClock(); lastGroup = "";
-    gEl.textContent = "소리 대기"; gEl.classList.remove("st"); enEl.textContent = " "; dbEl.textContent = ""; timeEl.textContent = "00:00";
+    gEl.textContent = "소리 대기"; live.className = "band"; gEl.classList.remove("st"); enEl.textContent = " "; dbEl.textContent = ""; timeEl.textContent = "00:00";
     gIc.firstChild.setAttribute("href", "vendor/icons/sprite.svg#ear"); gIcBox.classList.remove("calm");
     chipSudden.hidden = true; chipAnn.hidden = true;
   }
@@ -157,6 +159,7 @@ export function createMeasureTab(ctx) {
     meas.push(f);
     const s = meas.summary();
     gEl.textContent = GROUP_KO[f.group];
+    live.className = HUE[f.group] ? "band b-" + HUE[f.group] : "band";
     gIc.firstChild.setAttribute("href", `vendor/icons/sprite.svg#${GROUP_ICON[f.group]}`);
     gIcBox.classList.toggle("calm", f.group === "calm");
     enEl.textContent = `${f.topClass} ${Math.round(f.topScore * 100)}%`;

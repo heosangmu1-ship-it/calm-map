@@ -1,6 +1,6 @@
 /* Calm Map tokens: docs/DESIGN.md. No web fonts, no external requests. */
 :root {
-  --bg: #F6F4EF; --surface: #FFFFFF; --ink: #23303A; --ink-2: #5B6872; --line: #DDD8CE;
+  --bg: #F6F4EF; --surface: #FFFFFF; --ink: #23303A; --ink-2: #5B6872; --line: #E3D9C6;
   --calm: #5E9C86; --moderate: #A87A14; --high: #B8574F; --unknown: #7B848A;
   --accent: #2F5D7C; --on-accent: #FFFFFF;
   --wave: var(--accent); --wave-base: var(--line);
@@ -222,3 +222,24 @@ body[data-tab="measure"] main { flex: 1; min-height: 0; }
 .msheet .saved { margin-bottom: 8px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+/* U10b: docs/DESIGN-ADAPT.md changes 1-6 */
+#m-live.b-calm, #m-live.b-moderate, #m-live.b-high, #m-live.b-unknown {
+  --wave: var(--c); background: color-mix(in srgb, var(--c) 6%, var(--surface));
+  transition: background-color .3s cubic-bezier(.4, 0, .2, 1);
+}
+.strip { height: auto; min-height: 44px; }
+.db { font-size: clamp(24px, 4.4dvh, 36px); line-height: 1.1; font-weight: 700; min-height: 0; }
+.dbw .en { font-size: 12px; letter-spacing: .04em; }
+.map { --map-bg: color-mix(in srgb, var(--calm) 10%, var(--bg)); }
+.pin .dot { transition: box-shadow .18s cubic-bezier(.22, 1, .36, 1); }
+.screen-title { font-size: 32px; font-weight: 700; line-height: 1.15; letter-spacing: -.01em; }
+.foot h3 { font-size: 13px; font-weight: 600; letter-spacing: .06em; color: var(--ink-2); }
+.switch .track { transition: background-color .2s cubic-bezier(.4, 0, .2, 1), border-color .2s cubic-bezier(.4, 0, .2, 1); }
+.switch .track::after { transition: transform .2s cubic-bezier(.4, 0, .2, 1); }
+@keyframes sheet-in { from { clip-path: inset(100% 0 0 0 round 20px 20px 0 0); opacity: .4; } to { clip-path: inset(0 round 20px 20px 0 0); opacity: 1; } }
+@keyframes veil-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  dialog#sheet[open], dialog.msheet[open] { animation: sheet-in .28s cubic-bezier(.22, 1, .36, 1); }
+  dialog#sheet[open]::backdrop, dialog.msheet[open]::backdrop { animation: veil-in .2s linear; }
+}
